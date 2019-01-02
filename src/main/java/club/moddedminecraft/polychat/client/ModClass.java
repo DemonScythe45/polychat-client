@@ -19,15 +19,18 @@
  */
 package club.moddedminecraft.polychat.client;
 
+import club.moddedminecraft.polychat.networking.io.Message;
 import club.moddedminecraft.polychat.networking.io.MessageBus;
+import club.moddedminecraft.polychat.networking.io.ServerInfoMessage;
+import club.moddedminecraft.polychat.networking.io.ServerStatusMessage;
 import net.minecraft.server.MinecraftServer;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.Mod.EventHandler;
-import net.minecraftforge.fml.common.event.FMLInitializationEvent;
-import net.minecraftforge.fml.common.event.FMLPostInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLServerStartedEvent;
 import net.minecraftforge.fml.common.event.FMLServerStartingEvent;
+import net.minecraftforge.fml.common.event.FMLServerStoppingEvent;
 import net.minecraftforge.fml.common.network.NetworkCheckHandler;
 import net.minecraftforge.fml.relauncher.Side;
 
@@ -45,6 +48,8 @@ public class ModClass
     public static final String MODID = "polychat";
     public static final String NAME = "Poly Chat Client";
     public static final String VERSION = "1.0";
+    //Used to determine whether the server cleanly shutdown or crashed
+    public static boolean shutdownClean = false;
     public static MinecraftServer server;
     public static Properties properties;
     public static MessageBus messageBus;
@@ -57,25 +62,55 @@ public class ModClass
 
     @EventHandler
     public void preInit(FMLPreInitializationEvent event) {
+        //Registers game event listener class
         MinecraftForge.EVENT_BUS.register(new EventListener());
+        //Sets up the config values
         handleConfiguration(event.getModConfigurationDirectory());
-        handleClientConnection();
+        //Registers the shutdown hook
+        Runtime.getRuntime().addShutdownHook(new Thread(this::shutdownHook));
+    }
+
+    //Makes sure that the server offline message gets sent
+    public void shutdownHook() {
+        short exitVal;
+        if (shutdownClean) {
+            exitVal = 2;
+        }else {
+            exitVal = 3;
+        }
+        ServerStatusMessage statusMessage = new ServerStatusMessage(properties.getProperty("server_id"), exitVal);
+        ModClass.sendMessage(statusMessage);
+    }
+
+    //Contains null pointer exceptions from a failed connection to the main server
+    public static void sendMessage(Message message) {
+        try {
+            messageBus.sendMessage(message);
+        }catch (NullPointerException ignored) {}
     }
 
     @EventHandler
-    public void init(FMLInitializationEvent event) {
-
-    }
-
-    @EventHandler
-    public void postInit(FMLPostInitializationEvent event) {
-
-    }
-
-    @EventHandler
-    public void onServerStart(FMLServerStartingEvent event) {
+    public void onServerStarting(FMLServerStartingEvent event) {
         server = event.getServer();
+    }
 
+    @EventHandler
+    public void onStarted(FMLServerStartedEvent event) {
+        //Connects to the main polychat server
+        handleClientConnection();
+        //Reports the server as starting
+        ServerInfoMessage infoMessage = new ServerInfoMessage(properties.getProperty("server_id"),
+                properties.getProperty("server_name"),
+                properties.getProperty("server_address"), server.getMaxPlayers());
+        ModClass.sendMessage(infoMessage);
+        //Reports the server as online and ready to receive players
+        ServerStatusMessage statusMessage = new ServerStatusMessage(properties.getProperty("server_id"), (short) 1);
+        ModClass.sendMessage(statusMessage);
+    }
+
+    @EventHandler
+    public void onStopped(FMLServerStoppingEvent event) {
+        shutdownClean = true;
     }
 
     public void handleConfiguration(File modConfigDir) {
@@ -86,15 +121,19 @@ public class ModClass
             try (FileInputStream istream = new FileInputStream(config)) {
                 ModClass.properties.load(istream);
             } catch (IOException e) {
+                System.err.println("Error loading configuration file!");
                 e.printStackTrace();
             }
         }else{
             ModClass.properties.setProperty("address", "127.0.0.1");
             ModClass.properties.setProperty("port", "25566");
             ModClass.properties.setProperty("server_id", "empty");
+            ModClass.properties.setProperty("server_name", "empty");
+            ModClass.properties.setProperty("server_address", "empty");
             try (FileOutputStream ostream = new FileOutputStream(config)) {
                 ModClass.properties.store(ostream, null);
             } catch (IOException e) {
+                System.err.println("Error saving new configuration file!");
                 e.printStackTrace();
             }
         }
@@ -103,7 +142,7 @@ public class ModClass
     //Initiates the connection to the main polychat server and sets up the message callback
     public static void handleClientConnection() {
         try {
-            messageBus = new MessageBus(new Socket(properties.getProperty("address"), Integer.parseInt(properties.getProperty("port"))), EventListener::distributeMessage);
+            messageBus = new MessageBus(new Socket(properties.getProperty("address"), Integer.parseInt(properties.getProperty("port"))), EventListener::handleMessage);
             messageBus.start();
         } catch (IOException e) {
             System.err.println("Failed to establish polychat connection!");
