@@ -1,0 +1,13 @@
+--PolyChat Client--
+This is built using "gradlew build" and uses the recommended Forge build 14.23.5.2768 for MC 1.12.2.
+PolyChat Client is a mod that is placed in an MC server and connects to a running instance of Server using NetworkLibrary from https://github.com/john01dav/polychat.
+To compile this project, place NetworkLibrary.jar in a folder named "libs" at the top level of this project directory.
+NetworkLibrary.jar will also need to be placed in the mods folder of the desired MC server, so it is loaded for this mod to use.
+Chat, player join/leave events, and server online/offline/crashed events are broadcast and received using this system.
+
+--Config file for Client--
+address: This is the ip address of a running instance of Server to connect to.
+port: This is the port of a running instance of Server.
+server_id: This is used to identify the server of origin for chat messages as well as for player and server state events.  It is used for specifying a server in listplayers in discord.
+server_name: This is the full name of the server reported in listall.  An example is "All The Mods 3."
+server_address: This is the address MC clients can use to connect to this server, displayed in listall.
