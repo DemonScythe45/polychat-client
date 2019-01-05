@@ -19,12 +19,11 @@
  */
 package club.moddedminecraft.polychat.client;
 
-import club.moddedminecraft.polychat.networking.io.Message;
-import club.moddedminecraft.polychat.networking.io.MessageBus;
-import club.moddedminecraft.polychat.networking.io.ServerInfoMessage;
-import club.moddedminecraft.polychat.networking.io.ServerStatusMessage;
+import club.moddedminecraft.polychat.networking.io.*;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.util.text.ITextComponent;
 import net.minecraft.util.text.TextComponentString;
+import net.minecraft.util.text.TextFormatting;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.Mod.EventHandler;
@@ -58,6 +57,8 @@ public class ModClass
     public static Properties properties;
     public static MessageBus messageBus = null;
     public static Thread reattachThread;
+    public static TextComponentString serverIdText = null;
+    public static String idJson = null;
 
     //Forces the server to allow clients to join without the mod installed on their client
     @NetworkCheckHandler
@@ -72,6 +73,8 @@ public class ModClass
         reattachThread = new Thread(this::reattachThread);
         //Sets up the config values
         handleConfiguration(event.getModConfigurationDirectory());
+        //Establishes the color for the prefix
+        handlePrefix();
         //Registers the shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdownHook));
     }
@@ -81,19 +84,26 @@ public class ModClass
         try {
             while (true) {
                 try  {
-                    Thread.sleep(1000);
+                    //Checks socket status every 5 seconds
+                    Thread.sleep(5000);
                     if (messageBus == null || (messageBus.isSocketClosed())) {
+                        //Tells players ingame that the connection failed
                         if (isConnected) {
                             isConnected = false;
                             EventListener.sendTextComponent(new TextComponentString("[PolyChat] Lost connection to main server, attempting reconnect..."));
                         }
+                        //Stops threads if they are still running
                         if (messageBus != null) messageBus.stop();
+                        //Attempts to start the connection
                         messageBus = new MessageBus(new Socket(properties.getProperty("address"), Integer.parseInt(properties.getProperty("port"))), EventListener::handleMessage);
                         messageBus.start();
+                        //If the socket was reopened, wait 2 seconds to make sure sending online message works
                         if (!messageBus.isSocketClosed()) {
                             Thread.sleep(2000);
-                            sendServerOnline();
                             EventListener.sendTextComponent(new TextComponentString("[PolyChat] Connection re-established!"));
+                            sendServerOnline();
+                            Thread.sleep(1000);
+                            sendOnlinePlayers();
                             isConnected = true;
                         }
                     }
@@ -112,12 +122,14 @@ public class ModClass
     public void shutdownHook() {
         reattachThread.interrupt();
         short exitVal;
+        //Sends either crashed or offline depending on if shutdown happened cleanly
         if (shutdownClean) {
             exitVal = 2;
         }else {
             exitVal = 3;
         }
-        ServerStatusMessage statusMessage = new ServerStatusMessage(properties.getProperty("server_id"), exitVal);
+        ServerStatusMessage statusMessage = new ServerStatusMessage(properties.getProperty("server_id"),
+                ITextComponent.Serializer.componentToJson(ModClass.serverIdText), exitVal);
         ModClass.sendMessage(statusMessage);
         try {
             //Makes sure message has time to send
@@ -134,8 +146,20 @@ public class ModClass
                 properties.getProperty("server_address"), server.getMaxPlayers());
         ModClass.sendMessage(infoMessage);
         //Reports the server as online and ready to receive players
-        ServerStatusMessage statusMessage = new ServerStatusMessage(properties.getProperty("server_id"), (short) 1);
+        ServerStatusMessage statusMessage = new ServerStatusMessage(properties.getProperty("server_id"),
+                ITextComponent.Serializer.componentToJson(ModClass.serverIdText),(short) 1);
         ModClass.sendMessage(statusMessage);
+    }
+
+    //Sends a list of all online players silently for auto reconnect
+    public void sendOnlinePlayers() {
+        for (String player : server.getOnlinePlayerNames()) {
+            PlayerStatusMessage statusMessage = new PlayerStatusMessage(player,
+                    properties.getProperty("server_id"),
+                    ITextComponent.Serializer.componentToJson(ModClass.serverIdText),
+                    true, true);
+            ModClass.sendMessage(statusMessage);
+        }
     }
 
     //Contains null pointer exceptions from a failed connection to the main server
@@ -163,10 +187,28 @@ public class ModClass
         shutdownClean = true;
     }
 
+    //Sets the color to use for the server prefix in chat
+    public void handlePrefix() {
+        String idText = properties.getProperty("server_id");
+        if (!(idText.equals("empty"))) {
+            int code = Integer.parseInt(properties.getProperty("id_color"));
+            TextFormatting formatting;
+            if ((code < 0) || (code > 15)) {
+                formatting = TextFormatting.fromColorIndex(15);
+            }else{
+                formatting = TextFormatting.fromColorIndex(code);
+            }
+            serverIdText = new TextComponentString(idText);
+            serverIdText.getStyle().setColor(formatting);
+            idJson = ITextComponent.Serializer.componentToJson(ModClass.serverIdText);
+        }
+    }
+
     public void handleConfiguration(File modConfigDir) {
         ModClass.properties = new Properties();
         File config = new File(modConfigDir, "polychat.properties");
 
+        //Loads config if it exists or creates a default one if not
         if (config.exists() && config.isFile()) {
             try (FileInputStream istream = new FileInputStream(config)) {
                 ModClass.properties.load(istream);
@@ -180,6 +222,7 @@ public class ModClass
             ModClass.properties.setProperty("server_id", "empty");
             ModClass.properties.setProperty("server_name", "empty");
             ModClass.properties.setProperty("server_address", "empty");
+            ModClass.properties.setProperty("id_color", "15"); //Default to white color
             try (FileOutputStream ostream = new FileOutputStream(config)) {
                 ModClass.properties.store(ostream, null);
             } catch (IOException e) {

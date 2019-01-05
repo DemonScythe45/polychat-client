@@ -23,11 +23,13 @@ import club.moddedminecraft.polychat.networking.io.*;
 import net.minecraft.server.management.PlayerList;
 import net.minecraft.util.text.ITextComponent;
 import net.minecraft.util.text.TextComponentString;
+import net.minecraft.util.text.TextFormatting;
 import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.PlayerEvent;
 
 public class EventListener {
+
     //This gets messages sent on this server and sends them to the main polychat process
     @SubscribeEvent
     public void recieveChatEvent(ServerChatEvent event) {
@@ -40,25 +42,26 @@ public class EventListener {
     @SubscribeEvent
     public void playerJoin(PlayerEvent.PlayerLoggedInEvent event) {
         String id = ModClass.properties.getProperty("server_id");
-        if (!id.equals("empty")) {
-            event.player.addPrefix(new TextComponentString(id));
+        if (ModClass.serverIdText != null) {
+            event.player.addPrefix(ModClass.serverIdText);
         }
-        PlayerStatusMessage loginMsg = new PlayerStatusMessage(event.player.getName(), id, true);
+        PlayerStatusMessage loginMsg = new PlayerStatusMessage(event.player.getName(), id,
+                ModClass.idJson, true, false);
         ModClass.sendMessage(loginMsg);
     }
 
     @SubscribeEvent
     public void playerRespawn(PlayerEvent.PlayerRespawnEvent event) {
-        String id = ModClass.properties.getProperty("server_id");
-        if (!id.equals("empty")) {
-            event.player.addPrefix(new TextComponentString(id));
+        if (ModClass.serverIdText != null) {
+            event.player.addPrefix(ModClass.serverIdText);
         }
     }
 
     @SubscribeEvent
     public void playerLeave(PlayerEvent.PlayerLoggedOutEvent event) {
         String id = ModClass.properties.getProperty("server_id");
-        PlayerStatusMessage logoutMsg = new PlayerStatusMessage(event.player.getName(), id, false);
+        PlayerStatusMessage logoutMsg = new PlayerStatusMessage(event.player.getName(), id,
+                ModClass.idJson, false, false);
         ModClass.sendMessage(logoutMsg);
     }
 
@@ -80,7 +83,17 @@ public class EventListener {
         ITextComponent string = null;
         //Determines the content of the text component
         if (message instanceof BroadcastMessage) {
-            string = new TextComponentString(((BroadcastMessage) message).getMessage());
+            BroadcastMessage broadcastMessage = ((BroadcastMessage) message);
+            string = new TextComponentString(broadcastMessage.getPrefix());
+
+            TextFormatting formatting = TextFormatting.WHITE;
+            int color = broadcastMessage.prefixColor();
+            if ((color >= 0) && (color <= 15)) formatting = TextFormatting.fromColorIndex(color);
+            string.getStyle().setColor(formatting);
+
+            TextComponentString messageContent = new TextComponentString(" " + broadcastMessage.getMessage());
+            messageContent.getStyle().setColor(TextFormatting.WHITE);
+            string.appendSibling(messageContent);
         }else if (message instanceof ChatMessage){
             ChatMessage chatMessage = (ChatMessage) message;
             if (chatMessage.getComponentJson().equals("empty")) {
@@ -90,28 +103,38 @@ public class EventListener {
             }
         }else if (message instanceof ServerStatusMessage) {
             ServerStatusMessage serverStatus = ((ServerStatusMessage) message);
+            ITextComponent msgComponent = null;
             switch (serverStatus.getState()) {
                 case 1:
-                    string = new TextComponentString(serverStatus.getServerID() + " Server Online");
+                    msgComponent = new TextComponentString(" Server Online");
                     break;
                 case 2:
-                    string = new TextComponentString(serverStatus.getServerID() + " Server Offline");
+                    msgComponent = new TextComponentString(" Server Offline");
                     break;
                 case 3:
-                    string = new TextComponentString(serverStatus.getServerID() + " Server Crashed");
+                    msgComponent = new TextComponentString(" Server Crashed");
                     break;
                 default:
                     System.err.println("Unrecognized server state " + serverStatus.getState() + " received from " + serverStatus.getServerID());
             }
-        }else if (message instanceof PlayerStatusMessage) {
-            String statusString;
-            PlayerStatusMessage playerStatus = ((PlayerStatusMessage) message);
-            if (playerStatus.getJoined()) {
-                statusString = playerStatus.getServerID() + " " + playerStatus.getUserName() + " has joined the game";
-            }else {
-                statusString = playerStatus.getServerID() + " " + playerStatus.getUserName() + " has left the game";
+            if (msgComponent != null) {
+                string = ITextComponent.Serializer.fromJsonLenient(serverStatus.getPrefixJson());
+                msgComponent.getStyle().setColor(TextFormatting.WHITE);
+                string.appendSibling(msgComponent);
             }
-            string = new TextComponentString(statusString);
+        }else if (message instanceof PlayerStatusMessage) {
+            ITextComponent statusString;
+            PlayerStatusMessage playerStatus = ((PlayerStatusMessage) message);
+            if (!(playerStatus.getSilent())) {
+                if (playerStatus.getJoined()) {
+                    statusString = new TextComponentString(" " + playerStatus.getUserName() + " has joined the game");
+                }else {
+                    statusString = new TextComponentString(" " + playerStatus.getUserName() + " has left the game");
+                }
+                string = ITextComponent.Serializer.fromJsonLenient(playerStatus.getPrefixJson());
+                statusString.getStyle().setColor(TextFormatting.WHITE);
+                string.appendSibling(statusString);
+            }
         }
 
         if (string != null) sendTextComponent(string);
