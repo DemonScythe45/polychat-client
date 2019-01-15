@@ -33,7 +33,14 @@ public class EventListener {
     //This gets messages sent on this server and sends them to the main polychat process
     @SubscribeEvent
     public void recieveChatEvent(ServerChatEvent event) {
-        String nameWithPrefixes = event.getComponent().getUnformattedText().replace(event.getMessage(), "");
+        ITextComponent newMessage = ModClass.serverIdText.createCopy();
+        ITextComponent space = new TextComponentString(" ");
+        space.getStyle().setColor(TextFormatting.RESET);
+        space.appendSibling(event.getComponent());
+        newMessage.appendSibling(space);
+        event.setComponent(newMessage);
+        String unformattedText = event.getComponent().getUnformattedText();
+        String nameWithPrefixes = unformattedText.substring(0, unformattedText.lastIndexOf(event.getMessage()));
         ChatMessage chatMessage = new ChatMessage(nameWithPrefixes, event.getMessage(), ITextComponent.Serializer.componentToJson(event.getComponent()));
         ModClass.sendMessage(chatMessage);
     }
@@ -42,9 +49,11 @@ public class EventListener {
     @SubscribeEvent
     public void playerJoin(PlayerEvent.PlayerLoggedInEvent event) {
         String id = ModClass.properties.getProperty("server_id");
+        /**
         if (ModClass.serverIdText != null) {
             event.player.addPrefix(ModClass.serverIdText);
         }
+         **/
         PlayerStatusMessage loginMsg = new PlayerStatusMessage(event.player.getName(), id,
                 ModClass.idJson, true, false);
         ModClass.sendMessage(loginMsg);
@@ -52,9 +61,9 @@ public class EventListener {
 
     @SubscribeEvent
     public void playerRespawn(PlayerEvent.PlayerRespawnEvent event) {
-        if (ModClass.serverIdText != null) {
-            event.player.addPrefix(ModClass.serverIdText);
-        }
+        //if (ModClass.serverIdText != null) {
+        //    event.player.addPrefix(ModClass.serverIdText);
+        //}
     }
 
     @SubscribeEvent
@@ -97,7 +106,11 @@ public class EventListener {
         }else if (message instanceof ChatMessage){
             ChatMessage chatMessage = (ChatMessage) message;
             if (chatMessage.getComponentJson().equals("empty")) {
-                string = new TextComponentString(chatMessage.getUsername() + " " + chatMessage.getMessage());
+                string = new TextComponentString("[Discord] ");
+                string.getStyle().setColor(TextFormatting.DARK_PURPLE);
+                TextComponentString content = new TextComponentString(chatMessage.getUsername() + " " + chatMessage.getMessage());
+                content.getStyle().setColor(TextFormatting.RESET);
+                string.appendSibling(content);
             }else {
                 string = ITextComponent.Serializer.fromJsonLenient(chatMessage.getComponentJson());
             }
