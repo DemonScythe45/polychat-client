@@ -28,6 +28,9 @@ import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.PlayerEvent;
 
+import java.util.ArrayList;
+import java.util.Collections;
+
 public class EventListener {
 
     //This gets messages sent on this server and sends them to the main polychat process
@@ -49,11 +52,6 @@ public class EventListener {
     @SubscribeEvent
     public void playerJoin(PlayerEvent.PlayerLoggedInEvent event) {
         String id = ModClass.properties.getProperty("server_id");
-        /**
-        if (ModClass.serverIdText != null) {
-            event.player.addPrefix(ModClass.serverIdText);
-        }
-         **/
         PlayerStatusMessage loginMsg = new PlayerStatusMessage(event.player.getName(), id,
                 ModClass.idJson, true, false);
         ModClass.sendMessage(loginMsg);
@@ -61,9 +59,6 @@ public class EventListener {
 
     @SubscribeEvent
     public void playerRespawn(PlayerEvent.PlayerRespawnEvent event) {
-        //if (ModClass.serverIdText != null) {
-        //    event.player.addPrefix(ModClass.serverIdText);
-        //}
     }
 
     @SubscribeEvent
@@ -72,6 +67,9 @@ public class EventListener {
         PlayerStatusMessage logoutMsg = new PlayerStatusMessage(event.player.getName(), id,
                 ModClass.idJson, false, false);
         ModClass.sendMessage(logoutMsg);
+
+        ArrayList<String> playerList = new ArrayList<String>();
+        Collections.addAll(playerList, ModClass.server.getOnlinePlayerNames());
     }
 
     //This sends a text component to the server console and all players connected
