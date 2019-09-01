@@ -19,7 +19,11 @@
  */
 package club.moddedminecraft.polychat.client;
 
-import club.moddedminecraft.polychat.networking.io.*;
+import club.moddedminecraft.polychat.client.threads.ActivePlayerThread;
+import club.moddedminecraft.polychat.client.threads.ReattachThread;
+import club.moddedminecraft.polychat.networking.io.Message;
+import club.moddedminecraft.polychat.networking.io.MessageBus;
+import club.moddedminecraft.polychat.networking.io.ServerStatusMessage;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.text.ITextComponent;
 import net.minecraft.util.text.TextComponentString;
@@ -39,26 +43,43 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.Socket;
-import java.net.UnknownHostException;
 import java.util.Map;
 import java.util.Properties;
 
 @Mod(modid = ModClass.MODID, name = ModClass.NAME, version = ModClass.VERSION)
-public class ModClass
-{
+public class ModClass {
     public static final String MODID = "polychat";
     public static final String NAME = "Poly Chat Client";
     public static final String VERSION = "1.0";
     //Used to determine whether the server cleanly shutdown or crashed
     public static boolean shutdownClean = false;
     //Used to determine whether to send a connection lost warning in game
-    public static boolean isConnected = true;
     public static MinecraftServer server;
     public static Properties properties;
     public static MessageBus messageBus = null;
-    public static Thread reattachThread;
+    public static ReattachThread reattachThread;
+    public static ActivePlayerThread playerThread;
     public static TextComponentString serverIdText = null;
     public static String idJson = null;
+
+    //Contains null pointer exceptions from a failed connection to the main server
+    public static void sendMessage(Message message) {
+        try {
+            messageBus.sendMessage(message);
+        } catch (NullPointerException ignored) {
+        }
+    }
+
+    //Initiates the connection to the main polychat server and sets up the message callback
+    public static void handleClientConnection() {
+        try {
+            messageBus = new MessageBus(new Socket(properties.getProperty("address"), Integer.parseInt(properties.getProperty("port"))), EventListener::handleMessage);
+            messageBus.start();
+        } catch (IOException e) {
+            System.err.println("Failed to establish polychat connection!");
+            e.printStackTrace();
+        }
+    }
 
     //Forces the server to allow clients to join without the mod installed on their client
     @NetworkCheckHandler
@@ -70,103 +91,16 @@ public class ModClass
     public void preInit(FMLPreInitializationEvent event) {
         //Registers game event listener class
         MinecraftForge.EVENT_BUS.register(new EventListener());
-        reattachThread = new Thread(this::reattachThread);
-        //Sets up the config values
         handleConfiguration(event.getModConfigurationDirectory());
+
+        reattachThread = new ReattachThread(5000);
+        playerThread = new ActivePlayerThread(30000, properties.getProperty("server_id", "DEFAULT_ID"));
+
+        //Sets up the config values
         //Establishes the color for the prefix
         handlePrefix();
         //Registers the shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdownHook));
-    }
-
-    //Reattaches to the main server should it restart
-    public void reattachThread() {
-        try {
-            while (true) {
-                try  {
-                    //Checks socket status every 5 seconds
-                    Thread.sleep(5000);
-                    if (messageBus == null || (messageBus.isSocketClosed())) {
-                        //Tells players ingame that the connection failed
-                        if (isConnected) {
-                            isConnected = false;
-                            EventListener.sendTextComponent(new TextComponentString("[PolyChat] Lost connection to main server, attempting reconnect..."));
-                        }
-                        //Stops threads if they are still running
-                        if (messageBus != null) messageBus.stop();
-                        //Attempts to start the connection
-                        messageBus = new MessageBus(new Socket(properties.getProperty("address"), Integer.parseInt(properties.getProperty("port"))), EventListener::handleMessage);
-                        messageBus.start();
-                        //If the socket was reopened, wait 2 seconds to make sure sending online message works
-                        if (!messageBus.isSocketClosed()) {
-                            Thread.sleep(2000);
-                            EventListener.sendTextComponent(new TextComponentString("[PolyChat] Connection re-established!"));
-                            sendServerOnline();
-                            Thread.sleep(1000);
-                            sendOnlinePlayers();
-                            isConnected = true;
-                        }
-                    }
-                } catch (UnknownHostException e) {
-                    System.out.println("Unknown host exception on reattach");
-                } catch (IOException e) {
-                    System.out.println("IOException on reattach");
-                }
-            }
-        }catch (InterruptedException ignored) {
-            System.out.println("Reattach interrupted, stopping...");
-        }
-    }
-
-    //Makes sure that the server offline message gets sent
-    public void shutdownHook() {
-        reattachThread.interrupt();
-        short exitVal;
-        //Sends either crashed or offline depending on if shutdown happened cleanly
-        if (shutdownClean) {
-            exitVal = 2;
-        }else {
-            exitVal = 3;
-        }
-        ServerStatusMessage statusMessage = new ServerStatusMessage(properties.getProperty("server_id"),
-                ITextComponent.Serializer.componentToJson(ModClass.serverIdText), exitVal);
-        ModClass.sendMessage(statusMessage);
-        try {
-            //Makes sure message has time to send
-            Thread.sleep(1000);
-        } catch (InterruptedException ignored) {}
-        messageBus.stop();
-    }
-
-    //Put in a method to be used in two places
-    public void sendServerOnline() {
-        //Reports the server as starting
-        ServerInfoMessage infoMessage = new ServerInfoMessage(properties.getProperty("server_id"),
-                properties.getProperty("server_name"),
-                properties.getProperty("server_address"), server.getMaxPlayers());
-        ModClass.sendMessage(infoMessage);
-        //Reports the server as online and ready to receive players
-        ServerStatusMessage statusMessage = new ServerStatusMessage(properties.getProperty("server_id"),
-                ITextComponent.Serializer.componentToJson(ModClass.serverIdText),(short) 1);
-        ModClass.sendMessage(statusMessage);
-    }
-
-    //Sends a list of all online players silently for auto reconnect
-    public void sendOnlinePlayers() {
-        for (String player : server.getOnlinePlayerNames()) {
-            PlayerStatusMessage statusMessage = new PlayerStatusMessage(player,
-                    properties.getProperty("server_id"),
-                    ITextComponent.Serializer.componentToJson(ModClass.serverIdText),
-                    true, true);
-            ModClass.sendMessage(statusMessage);
-        }
-    }
-
-    //Contains null pointer exceptions from a failed connection to the main server
-    public static void sendMessage(Message message) {
-        try {
-            messageBus.sendMessage(message);
-        }catch (NullPointerException ignored) {}
     }
 
     @EventHandler
@@ -179,12 +113,36 @@ public class ModClass
         //Connects to the main polychat server
         handleClientConnection();
         reattachThread.start();
-        sendServerOnline();
+        reattachThread.sendServerOnline();
+        playerThread.start();
     }
 
     @EventHandler
     public void onStopped(FMLServerStoppingEvent event) {
         shutdownClean = true;
+    }
+
+
+    //Makes sure that the server offline message gets sent
+    public void shutdownHook() {
+        reattachThread.interrupt();
+        playerThread.interrupt();
+        short exitVal;
+        //Sends either crashed or offline depending on if shutdown happened cleanly
+        if (shutdownClean) {
+            exitVal = 2;
+        } else {
+            exitVal = 3;
+        }
+        ServerStatusMessage statusMessage = new ServerStatusMessage(properties.getProperty("server_id"),
+                ITextComponent.Serializer.componentToJson(ModClass.serverIdText), exitVal);
+        ModClass.sendMessage(statusMessage);
+        try {
+            //Makes sure message has time to send
+            Thread.sleep(1000);
+        } catch (InterruptedException ignored) {
+        }
+        messageBus.stop();
     }
 
     //Sets the color to use for the server prefix in chat
@@ -195,7 +153,7 @@ public class ModClass
             TextFormatting formatting;
             if ((code < 0) || (code > 15)) {
                 formatting = TextFormatting.fromColorIndex(15);
-            }else{
+            } else {
                 formatting = TextFormatting.fromColorIndex(code);
             }
             serverIdText = new TextComponentString(idText);
@@ -216,7 +174,7 @@ public class ModClass
                 System.err.println("Error loading configuration file!");
                 e.printStackTrace();
             }
-        }else{
+        } else {
             ModClass.properties.setProperty("address", "127.0.0.1");
             ModClass.properties.setProperty("port", "25566");
             ModClass.properties.setProperty("server_id", "empty");
@@ -229,17 +187,6 @@ public class ModClass
                 System.err.println("Error saving new configuration file!");
                 e.printStackTrace();
             }
-        }
-    }
-
-    //Initiates the connection to the main polychat server and sets up the message callback
-    public static void handleClientConnection() {
-        try {
-            messageBus = new MessageBus(new Socket(properties.getProperty("address"), Integer.parseInt(properties.getProperty("port"))), EventListener::handleMessage);
-            messageBus.start();
-        } catch (IOException e) {
-            System.err.println("Failed to establish polychat connection!");
-            e.printStackTrace();
         }
     }
 }
