@@ -24,6 +24,7 @@ import net.minecraft.server.management.PlayerList;
 import net.minecraft.util.text.ITextComponent;
 import net.minecraft.util.text.TextComponentString;
 import net.minecraft.util.text.TextFormatting;
+import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.PlayerEvent;
@@ -106,7 +107,8 @@ public class EventListener {
             if (chatMessage.getComponentJson().equals("empty")) {
                 string = new TextComponentString("[Discord] ");
                 string.getStyle().setColor(TextFormatting.DARK_PURPLE);
-                TextComponentString content = new TextComponentString(chatMessage.getUsername() + " " + chatMessage.getMessage());
+                // things are being weird here, not sure why I have to make a member despite the fact that the method is static
+                ITextComponent content = new ForgeHooks().newChatWithLinks(chatMessage.getUsername() + " " + chatMessage.getMessage());
                 content.getStyle().setColor(TextFormatting.RESET);
                 string.appendSibling(content);
             }else {
