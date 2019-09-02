@@ -29,10 +29,90 @@ import net.minecraftforge.event.ServerChatEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.PlayerEvent;
 
-import java.util.ArrayList;
-import java.util.Collections;
-
 public class EventListener {
+
+    //This sends a text component to the server console and all players connected
+    public static void sendTextComponent(ITextComponent component) {
+        ModClass.server.sendMessage(component);
+
+        //Loops over all players to send the message to them
+        PlayerList players = ModClass.server.getPlayerList();
+        for (String name : ModClass.server.getOnlinePlayerNames()) {
+            try {
+                players.getPlayerByUsername(name).sendMessage(component);
+            } catch (NullPointerException ignored) {
+            }
+        }
+    }
+
+    //This gets messages sent from the main polychat process and handles them
+    public static void handleMessage(Message message) {
+        ITextComponent string = null;
+        //Determines the content of the text component
+        if (message instanceof BroadcastMessage) {
+            BroadcastMessage broadcastMessage = ((BroadcastMessage) message);
+            string = new TextComponentString(broadcastMessage.getPrefix());
+
+            TextFormatting formatting = TextFormatting.WHITE;
+            int color = broadcastMessage.prefixColor();
+            if ((color >= 0) && (color <= 15)) formatting = TextFormatting.fromColorIndex(color);
+            string.getStyle().setColor(formatting);
+
+            TextComponentString messageContent = new TextComponentString(" " + broadcastMessage.getMessage());
+            messageContent.getStyle().setColor(TextFormatting.WHITE);
+            string.appendSibling(messageContent);
+        } else if (message instanceof ChatMessage) {
+            ChatMessage chatMessage = (ChatMessage) message;
+            if (chatMessage.getComponentJson().equals("empty")) {
+                string = new TextComponentString("[Discord] ");
+                string.getStyle().setColor(TextFormatting.DARK_PURPLE);
+                ITextComponent content = ForgeHooks.newChatWithLinks(chatMessage.getUsername() + " " + chatMessage.getMessage());
+                content.getStyle().setColor(TextFormatting.RESET);
+                string.appendSibling(content);
+            } else {
+                string = ITextComponent.Serializer.fromJsonLenient(chatMessage.getComponentJson());
+            }
+        } else if (message instanceof ServerStatusMessage) {
+            ServerStatusMessage serverStatus = ((ServerStatusMessage) message);
+            ITextComponent msgComponent = null;
+            switch (serverStatus.getState()) {
+                case 1:
+                    msgComponent = new TextComponentString(" Server Online");
+                    break;
+                case 2:
+                    msgComponent = new TextComponentString(" Server Offline");
+                    break;
+                case 3:
+                    msgComponent = new TextComponentString(" Server Crashed");
+                    break;
+                default:
+                    System.err.println("Unrecognized server state " + serverStatus.getState() + " received from " + serverStatus.getServerID());
+            }
+            if (msgComponent != null) {
+                string = ITextComponent.Serializer.fromJsonLenient(serverStatus.getPrefixJson());
+                msgComponent.getStyle().setColor(TextFormatting.WHITE);
+                string.appendSibling(msgComponent);
+            }
+        } else if (message instanceof PlayerStatusMessage) {
+            ITextComponent statusString;
+            PlayerStatusMessage playerStatus = ((PlayerStatusMessage) message);
+            if (!(playerStatus.getSilent())) {
+                if (playerStatus.getJoined()) {
+                    statusString = new TextComponentString(" " + playerStatus.getUserName() + " has joined the game");
+                } else {
+                    statusString = new TextComponentString(" " + playerStatus.getUserName() + " has left the game");
+                }
+                string = ITextComponent.Serializer.fromJsonLenient(playerStatus.getPrefixJson());
+                statusString.getStyle().setColor(TextFormatting.WHITE);
+                string.appendSibling(statusString);
+            }
+        } else if (message instanceof CommandMessage) {
+            String command = ((CommandMessage) message).getCommand();
+            ModClass.server.getCommandManager().executeCommand(new CommandSender(command), command);
+        }
+
+        if (string != null) sendTextComponent(string);
+    }
 
     //This gets messages sent on this server and sends them to the main polychat process
     @SubscribeEvent
@@ -68,88 +148,5 @@ public class EventListener {
         PlayerStatusMessage logoutMsg = new PlayerStatusMessage(event.player.getName(), id,
                 ModClass.idJson, false, false);
         ModClass.sendMessage(logoutMsg);
-
-        ArrayList<String> playerList = new ArrayList<String>();
-        Collections.addAll(playerList, ModClass.server.getOnlinePlayerNames());
-    }
-
-    //This sends a text component to the server console and all players connected
-    public static void sendTextComponent(ITextComponent component) {
-        ModClass.server.sendMessage(component);
-
-        //Loops over all players to send the message to them
-        PlayerList players = ModClass.server.getPlayerList();
-        for (String name : ModClass.server.getOnlinePlayerNames()) {
-            try {
-                players.getPlayerByUsername(name).sendMessage(component);
-            }catch (NullPointerException ignored) {}
-        }
-    }
-
-    //This gets messages sent from the main polychat process and handles them
-    public static void handleMessage(Message message) {
-        ITextComponent string = null;
-        //Determines the content of the text component
-        if (message instanceof BroadcastMessage) {
-            BroadcastMessage broadcastMessage = ((BroadcastMessage) message);
-            string = new TextComponentString(broadcastMessage.getPrefix());
-
-            TextFormatting formatting = TextFormatting.WHITE;
-            int color = broadcastMessage.prefixColor();
-            if ((color >= 0) && (color <= 15)) formatting = TextFormatting.fromColorIndex(color);
-            string.getStyle().setColor(formatting);
-
-            TextComponentString messageContent = new TextComponentString(" " + broadcastMessage.getMessage());
-            messageContent.getStyle().setColor(TextFormatting.WHITE);
-            string.appendSibling(messageContent);
-        }else if (message instanceof ChatMessage){
-            ChatMessage chatMessage = (ChatMessage) message;
-            if (chatMessage.getComponentJson().equals("empty")) {
-                string = new TextComponentString("[Discord] ");
-                string.getStyle().setColor(TextFormatting.DARK_PURPLE);
-                // things are being weird here, not sure why I have to make a member despite the fact that the method is static
-                ITextComponent content = new ForgeHooks().newChatWithLinks(chatMessage.getUsername() + " " + chatMessage.getMessage());
-                content.getStyle().setColor(TextFormatting.RESET);
-                string.appendSibling(content);
-            }else {
-                string = ITextComponent.Serializer.fromJsonLenient(chatMessage.getComponentJson());
-            }
-        }else if (message instanceof ServerStatusMessage) {
-            ServerStatusMessage serverStatus = ((ServerStatusMessage) message);
-            ITextComponent msgComponent = null;
-            switch (serverStatus.getState()) {
-                case 1:
-                    msgComponent = new TextComponentString(" Server Online");
-                    break;
-                case 2:
-                    msgComponent = new TextComponentString(" Server Offline");
-                    break;
-                case 3:
-                    msgComponent = new TextComponentString(" Server Crashed");
-                    break;
-                default:
-                    System.err.println("Unrecognized server state " + serverStatus.getState() + " received from " + serverStatus.getServerID());
-            }
-            if (msgComponent != null) {
-                string = ITextComponent.Serializer.fromJsonLenient(serverStatus.getPrefixJson());
-                msgComponent.getStyle().setColor(TextFormatting.WHITE);
-                string.appendSibling(msgComponent);
-            }
-        }else if (message instanceof PlayerStatusMessage) {
-            ITextComponent statusString;
-            PlayerStatusMessage playerStatus = ((PlayerStatusMessage) message);
-            if (!(playerStatus.getSilent())) {
-                if (playerStatus.getJoined()) {
-                    statusString = new TextComponentString(" " + playerStatus.getUserName() + " has joined the game");
-                }else {
-                    statusString = new TextComponentString(" " + playerStatus.getUserName() + " has left the game");
-                }
-                string = ITextComponent.Serializer.fromJsonLenient(playerStatus.getPrefixJson());
-                statusString.getStyle().setColor(TextFormatting.WHITE);
-                string.appendSibling(statusString);
-            }
-        }
-
-        if (string != null) sendTextComponent(string);
     }
 }
